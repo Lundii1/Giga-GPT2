@@ -4,24 +4,24 @@ import subprocess
 import sys
 
 import discord
-from transformers import GPT2Tokenizer, AutoModelWithLMHead
+from transformers import GPT2Tokenizer, AutoModelWithLMHead, GPT2LMHeadModel
 
 #global vars
 studying_bool = False
 # Load the tokenizer and model
 model_name_or_path = 'gpt2'
 tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path,pad_token='<pad>', eos_token='')
-model = AutoModelWithLMHead.from_pretrained('../output/lundii')
-lndtraining_data = "lundii.txt"
+model = GPT2LMHeadModel.from_pretrained('../output/lundii')
+lndtraining_data = "../data/lundii.txt"
 # Set up the Discord client
 intents = discord.Intents.all()
 client = discord.Client(intents=intents)
 
 # Define a function to generate text using the GPT-2 model
-def generate_text(prompt):
+def generate_text(prompt, tag):
     generated_text = model.generate(
         input_ids=tokenizer.encode(prompt, return_tensors='pt'),
-        max_length=150,
+        max_length=30,
         pad_token_id=tokenizer.eos_token_id,
         top_k=50,
         top_p=1.0,
@@ -30,7 +30,7 @@ def generate_text(prompt):
         num_return_sequences=3,
         num_beams=3,
         early_stopping=True,
-        length_penalty=0.3,
+        length_penalty=0.8,
         do_sample=False,
     )
     # Decode generated text and return
@@ -40,8 +40,12 @@ def generate_text(prompt):
         for line in generated_text_lines:
             if("@" not in line):
                 f.write(line+"\n")
+            if(str(tag) in line):
+                line = line.replace("<@"+str(tag)+">","")
+                f.write("Prompt: "+line.strip()+"\n")
     return generated_text
-# Define a function to handle incoming messages
+
+
 async def on_message(message):
     global studying_bool
     # Ignore messages from the bot itself
@@ -58,7 +62,7 @@ async def on_message(message):
         subprocess.Popen('cmd /c start python lundii_trainer.py', creationflags=subprocess.CREATE_NEW_CONSOLE)
         return
     await message.channel.send("Let me cook")
-    response = generate_text(message.content)
+    response = generate_text(message.content, message.raw_mentions[0]) if message.raw_mentions != [] else generate_text(message.content, 0)
     # Send the response back to the user
     await message.channel.send(response)
     # Store the current message as the last message
