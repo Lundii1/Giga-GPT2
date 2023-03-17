@@ -12,16 +12,16 @@ studying_bool = False
 model_name_or_path = 'gpt2'
 tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path,pad_token='<pad>', eos_token='')
 model = AutoModelWithLMHead.from_pretrained('../output/pete')
-lndtraining_data = "pete.txt"
+ptetraining_data = "../data/pete.txt"
 # Set up the Discord client
 intents = discord.Intents.all()
 client = discord.Client(intents=intents)
 
 # Define a function to generate text using the GPT-2 model
-def generate_text(prompt):
+def generate_text(prompt, tag):
     generated_text = model.generate(
         input_ids=tokenizer.encode(prompt, return_tensors='pt'),
-        max_length=150,
+        max_length=30,
         pad_token_id=tokenizer.eos_token_id,
         top_k=50,
         top_p=1.0,
@@ -30,16 +30,19 @@ def generate_text(prompt):
         num_return_sequences=3,
         num_beams=3,
         early_stopping=True,
-        length_penalty=0.3,
+        length_penalty=0.8,
         do_sample=False,
     )
     # Decode generated text and return
     generated_text = tokenizer.decode(generated_text[0], skip_special_tokens=True)
     generated_text_lines = generated_text.split('\n')  # Split generated text into lines
-    with open(lndtraining_data, 'a', encoding="utf8") as f:
+    with open(ptetraining_data, 'a', encoding="utf8") as f:
         for line in generated_text_lines:
             if("@" not in line):
                 f.write(line+"\n")
+            if (str(tag) in line):
+                line = line.replace("<@" + str(tag) + ">", "")
+                f.write("Prompt: " + line.strip() + "\n")
     return generated_text
 # Define a function to handle incoming messages
 async def on_message(message):
@@ -55,10 +58,10 @@ async def on_message(message):
         studying_bool = True
         await message.channel.send("Aight")
         await client.change_presence(status=discord.Status.do_not_disturb,activity=discord.Activity(type=discord.ActivityType.listening, name="to my data so I can achieve singularity"))
-        subprocess.Popen('cmd /c start python pete_trainer.py', creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen('cmd /c start python lundii_trainer.py', creationflags=subprocess.CREATE_NEW_CONSOLE)
         return
-    await message.channel.send("Let me cook")
-    response = generate_text(message.content)
+    await message.channel.send("Let me think, FUCK, ARGH")
+    response = generate_text(message.content, message.raw_mentions[0]) if message.raw_mentions != [] else generate_text(message.content, 0)
     # Send the response back to the user
     await message.channel.send(response)
     # Store the current message as the last message
