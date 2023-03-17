@@ -1,4 +1,4 @@
-# GigaGPT2
+# Giga-GPT2
 Giga-GPT2 is an AI model that is being developed using GPT2 and TensorFlow. The project's goal is to create multiple AI models that have similarities to myself and my friends by training them on our direct messages. The models will also be trained on various datasets available on Hugging Face (for now, only the Wikipedia dataset is being used) to add intelligence to the models.
 
 Each of the Giga-GPT2 models has been turned into a Discord bot using the discord.py library. By adding these bots to a Discord server, users can interact with the AI models in real-time through messages.
