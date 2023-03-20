@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import discord
+import openai
 from transformers import GPT2Tokenizer, AutoModelWithLMHead, GPT2LMHeadModel
 
 #global vars
@@ -21,17 +22,17 @@ client = discord.Client(intents=intents)
 def generate_text(prompt, tag):
     generated_text = model.generate(
         input_ids=tokenizer.encode(prompt, return_tensors='pt'),
-        max_length=30,
+        max_length=150,
         pad_token_id=tokenizer.eos_token_id,
         top_k=50,
         top_p=1.0,
         temperature=1.0,
-        repetition_penalty=5.0,
+        repetition_penalty=2.0,
         num_return_sequences=3,
         num_beams=3,
         early_stopping=True,
-        length_penalty=0.8,
-        do_sample=False,
+        length_penalty=0.3,
+        do_sample=True,
     )
     # Decode generated text and return
     generated_text = tokenizer.decode(generated_text[0], skip_special_tokens=True)

@@ -10,15 +10,15 @@ Lines = file.readlines()
 text = ""
 for i, line in enumerate(Lines):
     if (line != ""):
-        if (line.count("Pete#")):
+        if (line.count("Trolltusk#")):
             if("https" not in Lines[i + 1] and "cdn" not in Lines[i + 1]):
                text += Lines[i + 1]
 
 y = open("../data/Oxford English Dictionary.txt", encoding="utf8")
 f = open("../data/pete.txt", "w", encoding="utf8")
-f.write(text)
+f.write(text+"\n"* 2)
 #adding more weight to the Oxford English Dictionary
-f.write(y.read()+"\n"* 3)
+f.write(y.read())
 f.close()
 print(text)
 # Load the tokenizer and model
