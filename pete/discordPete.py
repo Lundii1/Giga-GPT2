@@ -11,7 +11,7 @@ studying_bool = False
 # Load the tokenizer and model
 model_name_or_path = 'gpt2'
 tokenizer = GPT2Tokenizer.from_pretrained(model_name_or_path,pad_token='<pad>', eos_token='')
-model = AutoModelWithLMHead.from_pretrained('../output/pete')
+model = GPT2LMHeadModel.from_pretrained('../output/pete')
 ptetraining_data = "../data/pete.txt"
 # Set up the Discord client
 intents = discord.Intents.all()
@@ -21,17 +21,17 @@ client = discord.Client(intents=intents)
 def generate_text(prompt, tag):
     generated_text = model.generate(
         input_ids=tokenizer.encode(prompt, return_tensors='pt'),
-        max_length=30,
+        max_length=50,
         pad_token_id=tokenizer.eos_token_id,
         top_k=50,
         top_p=1.0,
         temperature=1.0,
-        repetition_penalty=5.0,
+        repetition_penalty=2.0,
         num_return_sequences=3,
         num_beams=3,
         early_stopping=True,
-        length_penalty=0.8,
-        do_sample=False,
+        length_penalty=0.3,
+        do_sample=True,
     )
     # Decode generated text and return
     generated_text = tokenizer.decode(generated_text[0], skip_special_tokens=True)
@@ -52,15 +52,15 @@ async def on_message(message):
         return
     # If particuliar message from a particular person (Lundii), update the bot with new data
     if studying_bool:
-        await message.channel.send("Let me study in peace skrub")
+        await message.channel.send("Let me study in peace")
         return
     if message.author.id == 292467895374446593 and "Go study" in message.content:
         studying_bool = True
         await message.channel.send("Aight")
         await client.change_presence(status=discord.Status.do_not_disturb,activity=discord.Activity(type=discord.ActivityType.listening, name="to my data so I can achieve singularity"))
-        subprocess.Popen('cmd /c start python lundii_trainer.py', creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen('cmd /c start python pete_trainer.py', creationflags=subprocess.CREATE_NEW_CONSOLE)
         return
-    await message.channel.send("Let me think, FUCK, ARGH")
+    await message.channel.send("Let me think, ARGH")
     response = generate_text(message.content, message.raw_mentions[0]) if message.raw_mentions != [] else generate_text(message.content, 0)
     # Send the response back to the user
     await message.channel.send(response)

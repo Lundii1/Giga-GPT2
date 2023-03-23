@@ -14,7 +14,7 @@ Lines = file.readlines()
 text = ""
 for i, line in enumerate(Lines):
    if (line != ""):
-        if (line.count("Lundii#")):
+        if (line.count("Lundii")):
           if ("https" not in Lines[i + 1] and "cdn" not in Lines[i + 1]):
                 text += Lines[i + 1]
 f = open("../data/lundii.txt", "w", encoding="utf8")

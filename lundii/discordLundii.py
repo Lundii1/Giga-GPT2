@@ -22,7 +22,7 @@ client = discord.Client(intents=intents)
 def generate_text(prompt, tag):
     generated_text = model.generate(
         input_ids=tokenizer.encode(prompt, return_tensors='pt'),
-        max_length=150,
+        max_length=50,
         pad_token_id=tokenizer.eos_token_id,
         top_k=50,
         top_p=1.0,
