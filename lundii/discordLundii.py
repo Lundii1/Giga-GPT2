@@ -53,7 +53,7 @@ async def on_message(message):
         return
     # If particuliar message from a particular person (Lundii), update the bot with new data
     if studying_bool:
-        await message.channel.send("Let me study in peace skrub")
+        await message.channel.send("Let me study in peace")
         return
     if message.author.id == 292467895374446593 and "Go study" in message.content:
         studying_bool = True
