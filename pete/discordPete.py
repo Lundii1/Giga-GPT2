@@ -56,11 +56,11 @@ async def on_message(message):
         return
     if message.author.id == 292467895374446593 and "Go study" in message.content:
         studying_bool = True
-        await message.channel.send("Aight")
+        await message.channel.send("Okay")
         await client.change_presence(status=discord.Status.do_not_disturb,activity=discord.Activity(type=discord.ActivityType.listening, name="to my data so I can achieve singularity"))
         subprocess.Popen('cmd /c start python lundii_trainer.py', creationflags=subprocess.CREATE_NEW_CONSOLE)
         return
-    await message.channel.send("Let me think, FUCK, ARGH")
+    await message.channel.send("Let me think")
     response = generate_text(message.content, message.raw_mentions[0]) if message.raw_mentions != [] else generate_text(message.content, 0)
     # Send the response back to the user
     await message.channel.send(response)
