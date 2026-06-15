@@ -1,0 +1,36 @@
+# Optional dependencies for voice-channel support (voice_giga.py).
+# The text bot runs fine without these; install them to let Giga-AI join a
+# voice channel, transcribe speech per speaker, and reply with TTS.
+#
+# IMPORTANT: discord-ext-voice-recv only publishes pre-releases, so you MUST
+# pass --pre or pip may give you an old build that can't decrypt Discord's
+# current AEAD voice encryption (symptom: OpusError "corrupted stream"):
+#
+#   pip install -U --pre -r requirements-voice.txt
+#
+# Also required, but not pip-installable:
+#   - FFmpeg on your PATH        (Discord audio playback)
+#   - libopus                    (voice decode; bundled with discord.py on Windows/macOS)
+
+# IMPORTANT — Discord DAVE E2EE (enforced 2026-03-02) and voice RECEIVE:
+# Discord now end-to-end encrypts all *non-stage* voice calls. This affects
+# receiving audio (the whole ecosystem, discord.js included), not your bot:
+#   * discord.py < 2.7  -> can't even connect; voice closes with code 4017.
+#   * discord.py >= 2.7 -> connects, but voice-recv does NOT decrypt DAVE, so
+#     audio from a normal voice channel arrives as garbled noise (issue #53).
+#   * STAGE channels are exempt from E2EE enforcement, so voice-recv can still
+#     decode them -> running the bot in a Stage channel is the current workaround.
+# Bottom line: use discord.py >= 2.7 (needed just to connect) and use a Stage
+# channel for receive until voice-recv implements DAVE.
+discord.py[voice]>=2.7          # 2.7+ required to connect at all (DAVE); see note above
+davey>=0.1.5                    # DAVE E2EE runtime for discord.py 2.7+. Lets the bot
+                                # participate in encrypted calls and SPEAK (TTS) under DAVE.
+                                # NOTE: does NOT fix RECEIVE -- voice-recv (below) does its
+                                # own packet decryption and has no DAVE support, so audio
+                                # from normal channels is still garbled. Use a Stage channel
+                                # (E2EE-exempt) for receive until voice-recv adds DAVE.
+discord-ext-voice-recv>=0.5.2a  # per-speaker voice receive (pre-release; needs --pre)
+cryptography>=42.0              # AES-GCM AEAD decryption backend (xchacha20 comes via PyNaCl)
+faster-whisper>=1.0.0           # local speech-to-text (GPU-capable)
+edge-tts>=6.1.9                 # free, high-quality text-to-speech
+pyttsx3>=2.90                   # offline TTS fallback (used if edge-tts is unavailable)

@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+voice_debug/*
 # C extensions
 *.so
 
@@ -22,6 +22,12 @@ var/
 wheels/
 data/
 output/
+# Raw Discord export — private group messages, keep local
+dataset.txt
+# Transcribed private voice chats, keep local
+dataset_interactions_voice.txt
+# Locally-downloaded base model weights (large)
+models/
 pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
@@ -129,3 +135,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+dataset_interactions.txt
