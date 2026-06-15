@@ -39,7 +39,7 @@ ADAPTER_DIR = "output/giga7b_light/checkpoint-3850"
 BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 # How hard the LoRA pulls: 0.0 = pure base Qwen, 1.0 = full fine-tune.
 # Lower = more coherent, higher = more Giga. Tune this to taste (~0.85-1.0 for max edge).
-LORA_WEIGHT = 1.0 # 0.42
+LORA_WEIGHT = 0.42 # 0.42
 
 # For the old TinyLlama model, use:
 # ADAPTER_DIR = "output/giga"
@@ -385,7 +385,7 @@ def _voice_reply(text, speaker_name, guild_id):
 GIGA_VOICE_PROMPT = (
     "Casual voice chat in the Giga Discord group with Giga-AI, also called Giga. "
     "Usual speakers: Lundii, Pete (Trolltusk), Wilson (BitPumpkin) , Jake (Jayteeh), Dakota (Rpgman1234), "
-    "Wyatt, Xinny. DarnBannedAgain (Zack), Sybr, and sometimes others. "
+    "Wyatt, Xinny (It's never Jenny, it's Xinny). DarnBannedAgain (Zack), Sybr, and sometimes others. "
 )
 
 
