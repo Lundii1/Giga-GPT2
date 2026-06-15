@@ -1,6 +1,6 @@
 """Voice-channel support for the Giga Discord bot.
 
-Lets Giga-AI sit in a Discord voice channel and hold a spoken conversation:
+Lets Chat sit in a Discord voice channel and hold a spoken conversation:
 
   1. **Listen** -- receives each speaker's audio separately (Discord tags every
      RTP stream with the member who sent it), buffers it per-user, and cuts an
@@ -250,7 +250,7 @@ class _VoiceSession:
             print(f"[voice] transcript callback failed for {speaker}: {exc}")
 
         if not self.owner._is_addressed(text):
-            print("[voice] (not addressed — say 'giga' to talk to me, "
+            print("[voice] (not addressed — say 'chat' to talk to me, "
                   "or run with GIGA_VOICE_RESPOND_ALL=1 to reply to everything)")
             return
 
@@ -260,7 +260,7 @@ class _VoiceSession:
             return
         print(f"[voice:reply] {reply}")
         if self.owner.post_replies and self.text_channel:
-            await _safe_send(self.text_channel, f"🤖 **Giga-AI:** {reply}")
+            await _safe_send(self.text_channel, f"🤖 **Chat:** {reply}")
 
         await self._speak(reply)
 
@@ -290,9 +290,35 @@ class _VoiceSession:
 
     async def close(self):
         self.active = False
+        
+        # CRITICAL: Stop listening first to prevent new audio from arriving
+        try:
+            if hasattr(self.vc, 'stop_listening'):
+                self.vc.stop_listening()
+        except Exception:
+            pass
+        
+        # Cancel background tasks and wait for them to finish
         for task in (self._flush_task, self._consume_task):
-            if task:
+            if task and not task.done():
                 task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+        
+        # Clear buffers to free memory
+        self._buffers.clear()
+        self._pending.clear()
+        
+        # Drain the queue to unblock any waiting consumers
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        
+        # Finally disconnect
         try:
             if self.vc.is_connected():
                 self.vc.stop()
@@ -302,13 +328,13 @@ class _VoiceSession:
 
 
 class VoiceChat:
-    """Manages Giga-AI's voice sessions across guilds.
+    """Manages Chat's voice sessions across guilds.
 
     Parameters
     ----------
     reply_fn:
         ``reply_fn(text, speaker_name, guild_id) -> str``. May be sync or async.
-        This is where the persona model produces Giga-AI's spoken reply.
+        This is where the persona model produces Chat's spoken reply.
     transcript_fn:
         Optional ``transcript_fn(text, speaker_name, guild_id)`` callback called
         for every successful transcription, including speech that does not
@@ -354,22 +380,17 @@ class VoiceChat:
         device="cuda" if torch.cuda.is_available() else "cpu",
         language="en",
         initial_prompt=(
-            "Casual voice chat in the Giga Discord group with Giga-AI, also "
-            "called Giga."
+            "Casual voice chat in the Giga Discord group with Chat, also "
+            "called chat-ai."
         ),
         wake_words=(
-            "giga",
-            "gigaai",
-            "giga ai",
-            "giga-ai",
-            "gig it ai",
-            "gig-it-ai",
-            "gig_it_ai",
-            "gig it a i",
-            "gigit ai",
-            "gigitai",
-            "jig it ai",
-            "jigitai",
+            "chat",
+            "chat-ai",
+            "chat ai",
+            "chat_ai",
+            "chatai",
+            "chat a i",
+            "chat a.i.",
         ),
         respond_to_all=False,
         silence_seconds=0.8,
@@ -560,18 +581,14 @@ class VoiceChat:
     def _is_addressed(self, text):
         if self.respond_to_all:
             return True
-        # Whisper rarely spells the wake word cleanly -- it writes "giga" as
-        # "gig a", "gigga", "geega", "jigga", "gig it ai", etc. Collapse to
-        # letters and match a fuzzy family so casual misrecognitions still wake
-        # the bot.
         collapsed = re.sub(r"[^a-z]", "", text.lower())
         if any(re.sub(r"[^a-z]", "", w) in collapsed for w in self.wake_words):
             return True
-        if re.search(r"\b[gj]ig\s*it\s*a\s*i\b", text.lower()):
+        if re.search(r"\bchat\s*a\s*i\b", text.lower()):
             return True
-        if re.search(r"[gj]ig(?:it|ita|itai|etai|gitai)", collapsed):
+        if re.search(r"chat(?:ai|a\s*i|a\.i\.|ay)", collapsed):
             return True
-        return bool(re.search(r"\b[gj][ei]+g+[ae]+\b", text.lower()))
+        return bool(re.search(r"\bch[ae]+t\b", text.lower()))
 
     # -- reply ----------------------------------------------------------------
     async def _call_transcript_fn(self, text, speaker, guild_id):

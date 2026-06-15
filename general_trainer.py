@@ -9,7 +9,7 @@ Why chat-format SFT with loss masking?
   and dynamics) but to *never emit a speaker name* in its own replies. So every
   training example is:
 
-      system   : the GigaAI persona prompt (see giga_common.SYSTEM_PROMPT)
+      system   : the Chat persona prompt (see giga_common.SYSTEM_PROMPT)
       user     : the recent transcript, rendered "author: content" per line
       assistant: the bare next message (no name)
 

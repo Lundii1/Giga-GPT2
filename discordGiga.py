@@ -129,7 +129,7 @@ history = defaultdict(lambda: deque(maxlen=CONTEXT_TURNS))
 natural_gif_last_sent_at = {}
 
 # Names that refer to the bot itself (used to separate "self" from "other").
-BOT_NAME_VARIANTS = {"giga-ai", "giga ai", "giga_ai", "gigaa i", "gigaai"}
+BOT_NAME_VARIANTS = {"chat", "chat-ai", "chat ai", "chat_ai", "chati", "chatt"}
 
 
 def _format_reply_reference(replied_to):
@@ -139,7 +139,7 @@ def _format_reply_reference(replied_to):
 
 def _clean_context_turns(turns):
     """
-    Separate "self" (Giga-AI) from "other" in the context window.
+    Separate "self" (Chat) from "other" in the context window.
     Bot messages are either dropped or clearly labeled so the model
     never mistakes its own past output for a human message.
     """
@@ -149,7 +149,7 @@ def _clean_context_turns(turns):
         if author_lower in BOT_NAME_VARIANTS:
             # Label clearly instead of dropping — the model can still learn its own style.
             cleaned.append({
-                "author": "Giga-AI (me)",
+                "author": "Chat (me)",
                 "content": t["content"]
             })
         else:
@@ -173,7 +173,7 @@ def _debug_print_context(context_turns, target, replied_to, interlocutor, tool_c
     print("-" * 80)
     if context_turns:
         for i, t in enumerate(context_turns, 1):
-            prefix = "🤖" if "Giga-AI (me)" in t["author"] else "👤"
+            prefix = "🤖" if "Chat (me)" in t["author"] else "👤"
             print(f"{prefix} [{i:02d}] {t['author']}: {t['content']}")
     else:
         print("(no prior context)")
@@ -226,9 +226,9 @@ def generate_reply(history, target, replied_to=None, context_turns=None, tool_co
     )
     user_content = (
         f"Current conversation partner: {interlocutor}\n"
-        f"You are Giga-AI. You are talking to {interlocutor} right now.\n\n"
+        f"You are Chat. You are talking to {interlocutor} right now.\n\n"
         f"{tool_context_block}"
-        f"Group chat transcript (your own past lines are labeled 'Giga-AI (me)'):\n{context_block}\n\n"
+        f"Group chat transcript (your own past lines are labeled 'Chat (me)'):\n{context_block}\n\n"
         f"{reply_reference_block}"
         f"THE MESSAGE YOU MUST REPLY TO:\n{target_line}\n\n"
         "Reply ONLY to the final human message above. "
@@ -275,7 +275,7 @@ def log_interaction(context_turns, target, ai_reply, replied_to=None):
     It also always logs a clean single-turn entry (target + reply only) to
     INTERACTION_DATASET for direct-reply training.
 
-    Bot messages are logged with the "Giga-AI (me)" label so the training data
+    Bot messages are logged with the "Chat (me)" label so the training data
     never contains ambiguous self-references.
     """
     clean_reply = strip_name_prefix(ai_reply).strip()
@@ -352,7 +352,7 @@ def _voice_heard(text, speaker_name, guild_id):
 
 
 def _voice_reply(text, speaker_name, guild_id):
-    """Produce Giga-AI's spoken reply to a transcribed utterance.
+    """Produce Chat's spoken reply to a transcribed utterance.
 
     Reuses the exact text-chat generation path so the voice persona is identical.
     Called from voice_giga (already off the event loop), so it can block on the GPU.
@@ -372,7 +372,7 @@ def _voice_reply(text, speaker_name, guild_id):
     if not heard_already:
         hist.append({"id": None, "author": speaker_name, "content": text})
     if reply:
-        hist.append({"id": None, "author": "Giga-AI", "content": reply})
+        hist.append({"id": None, "author": "Chat", "content": reply})
         log_voice_interaction(speaker_name, text, reply)
     return reply
 
@@ -383,7 +383,7 @@ def _voice_reply(text, speaker_name, guild_id):
 # the wake word AND cleans up the text the model then has to reply to. Override or
 # extend it for your own server via the GIGA_VOICE_PROMPT environment variable.
 GIGA_VOICE_PROMPT = (
-    "Casual voice chat in the Giga Discord group with Giga-AI, also called Giga. "
+    "Casual voice chat in the Giga Discord group, You are called 'Chat'"
     "Usual speakers: Lundii, Pete (Trolltusk), Wilson (BitPumpkin) , Jake (Jayteeh), Dakota (Rpgman1234), "
     "Wyatt, Xinny (It's never Jenny, it's Xinny). DarnBannedAgain (Zack), Sybr, and sometimes others. "
 )
@@ -447,7 +447,7 @@ def _turn_from_message(message):
     if not content:
         return None
 
-    author = "Giga-AI" if message.author == client.user else _format_author_name(message.author)
+    author = "Chat" if message.author == client.user else _format_author_name(message.author)
     return {
         "id": message.id,
         "author": author,
@@ -655,7 +655,7 @@ def _search_klipy_gif_sync(query):
     for path in candidate_paths:
         request = urllib.request.Request(
             f"{api_base}{path}",
-            headers={"User-Agent": "Giga-AI Discord Bot"},
+            headers={"User-Agent": "Chat Discord Bot"},
         )
         if auth_key:
             # Klipy partner keys are managed separately from dashboard bearer tokens.
@@ -838,7 +838,7 @@ async def on_message(message):
     # can anchor to that line without treating it as a fresh human prompt.
     replied_to = None
     if ref is not None:
-        replied_to_author = "Giga-AI (me)" if is_reply_to_bot else _format_author_name(ref.author)
+        replied_to_author = "Chat (me)" if is_reply_to_bot else _format_author_name(ref.author)
         replied_to = {
             "id": ref.id,
             "author": replied_to_author,
@@ -937,7 +937,7 @@ async def on_message(message):
             history_content = f"{reply}\n[sent GIF: {gif_query}]".strip()
         history[message.channel.id].append({
             "id": sent.id,
-            "author": "Giga-AI",
+            "author": "Chat",
             "content": history_content,
         })
 

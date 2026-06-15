@@ -71,7 +71,7 @@ python discordGiga.py
 
 ## Voice chat (optional)
 
-Giga-AI can also join a **voice channel**, listen, and talk back. It receives each
+Chat can also join a **voice channel**, listen, and talk back. It receives each
 speaker's audio separately, transcribes it with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 (local, GPU-capable), feeds the text through the *same* persona model used for text
 chat, and speaks the reply with [edge-tts](https://github.com/rany2/edge-tts).
@@ -109,10 +109,10 @@ You also need **FFmpeg on your PATH**, and **discord.py ≥ 2.7**.
 
 **Use it in Discord:**
 1. Join a voice channel yourself.
-2. Type `!join` (or `@Giga-AI join the vc`). The bot pulls up and starts listening.
+2. Type `!join` (or `@Chat join the vc`). The bot pulls up and starts listening.
 3. Say something with **"giga"** in it — that's the voice version of @-mentioning it.
    It transcribes you, replies in character, and speaks the reply out loud.
-4. Type `!leave` (or `@Giga-AI leave vc`) to make it disconnect.
+4. Type `!leave` (or `@Chat leave vc`) to make it disconnect.
 
 **Tuning (environment variables):**
 

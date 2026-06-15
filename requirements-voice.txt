@@ -1,5 +1,5 @@
 # Optional dependencies for voice-channel support (voice_giga.py).
-# The text bot runs fine without these; install them to let Giga-AI join a
+# The text bot runs fine without these; install them to let Chat join a
 # voice channel, transcribe speech per speaker, and reply with TTS.
 #
 # IMPORTANT: discord-ext-voice-recv only publishes pre-releases, so you MUST
