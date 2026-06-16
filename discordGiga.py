@@ -98,7 +98,7 @@ REASONING_MAX_NEW_TOKENS = int(os.environ.get("GIGA_REASONING_MAX_NEW_TOKENS", "
 OOM_RETRY_MAX_NEW_TOKENS = int(os.environ.get("GIGA_OOM_RETRY_MAX_NEW_TOKENS", "700"))
 # ================================================================
 
-MODEL_DTYPE = torch.float32
+MODEL_DTYPE = torch.bfloat16
 
 # ---- Load model (LoRA adapter on top of base, or a full fine-tune) ----------
 print(f"Loading tokenizer from {ADAPTER_DIR}...")
@@ -115,7 +115,7 @@ processor = AutoProcessor.from_pretrained(PROCESSOR_MODEL, trust_remote_code=Tru
 if hasattr(processor, "tokenizer"):
     processor.tokenizer = tokenizer
 
-print(f"Loading model (base={BASE_MODEL}) in fp32...")
+print(f"Loading model (base={BASE_MODEL}) in {MODEL_DTYPE}...")
 if os.path.exists(os.path.join(ADAPTER_DIR, "adapter_config.json")):
     from peft import PeftModel
     model = AutoModelForMultimodalLM.from_pretrained(
@@ -212,21 +212,49 @@ def _clean_generated_reply(text):
     return text
 
 
+def _strip_model_control_tokens(text):
+    """Remove visible chat-template/control tokens that should never hit Discord."""
+    text = re.sub(r"(?is)<start_of_turn>\s*model\s*", "", text or "")
+    text = re.sub(r"(?is)<end_of_turn>", "", text)
+    text = re.sub(r"(?is)<\|(?:channel|message|end|start|turn|model|user|assistant)[^>]*>", "", text)
+    return text
+
+
 def _clean_reasoning_output(text):
     """Strip private thinking markers and return only the final visible answer."""
+    raw_text = text or ""
     try:
-        parsed = processor.parse_response(text)
+        parsed = processor.parse_response(raw_text)
         if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
-            text = parsed["content"]
+            raw_text = parsed["content"]
     except Exception:
         pass
-    text = re.sub(r"(?is)<thinking>.*?</thinking>", "", text or "")
+
+    # Gemma thinking mode may decode with explicit channel markers such as
+    # <|channel>thought and <|channel>final. Only the final channel is safe to send.
+    channel_pattern = r"(?is)<\|channel\|?>\s*(thought|analysis|final|commentary)"
+    final_matches = list(re.finditer(r"(?is)<\|channel\|?>\s*final", raw_text))
+    if final_matches:
+        text = raw_text[final_matches[-1].end():]
+        next_channel = re.search(channel_pattern, text)
+        if next_channel:
+            text = text[:next_channel.start()]
+    elif re.search(r"(?is)<\|channel\|?>\s*(thought|analysis)", raw_text):
+        print("[tool:reasoning] Suppressed private thought channel because no final channel was produced")
+        return "i got stuck thinking and didn't produce a final answer"
+    else:
+        text = raw_text
+
+    text = re.sub(r"(?is)<thinking>.*?</thinking>", "", text)
     text = re.sub(r"(?is)<think>.*?</think>", "", text)
     text = re.sub(r"(?is)^.*?</thinking>", "", text)
     text = re.sub(r"(?is)^.*?</think>", "", text)
-    text = re.sub(r"(?is)<start_of_turn>\s*model\s*", "", text)
-    text = re.sub(r"(?is)<end_of_turn>", "", text)
-    return _clean_generated_reply(text)
+    text = _strip_model_control_tokens(text)
+    cleaned = _clean_generated_reply(text)
+    if re.search(r"(?is)<\|channel\|?>\s*(thought|analysis)", cleaned):
+        print("[tool:reasoning] Suppressed leftover private thought marker after cleanup")
+        return "i got stuck thinking and didn't produce a final answer"
+    return cleaned
 
 
 def _decode_generated_tokens(output, input_len, reasoning_enabled=False):
