@@ -1,8 +1,11 @@
-"""Fine-tune TinyLlama on the Giga group's chat to imitate its collective voice.
+"""Fine-tune Gemma on the Giga group's chat to imitate its collective voice.
 
 Pipeline position::
 
     parser.py  ->  data/conversations.jsonl  ->  [this]  ->  output/giga
+
+``data/conversations.jsonl`` from ``parser.py`` is used by default. Raw
+``dataset.txt`` is still accepted if passed with ``--input dataset.txt``.
 
 Why chat-format SFT with loss masking?
   We want the model to know *who said what* (so it learns the group's turn-taking
@@ -46,15 +49,73 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
 
 from giga_common import SYSTEM_PROMPT, render_transcript
 
-# Prefer a locally-downloaded copy (models/TinyLlama-1.1B-Chat-v1.0); fall back to
-# the Hugging Face Hub id if it isn't present.
-_LOCAL_MODEL = "models/TinyLlama-1.1B-Chat-v1.0"
-MODEL_NAME = _LOCAL_MODEL if os.path.isdir(_LOCAL_MODEL) else "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def load_sessions(path):
+def _first_existing_path(*paths):
+    for path in paths:
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+# Prefer a locally-downloaded copy; fall back to the Hugging Face Hub id.
+_LOCAL_MODEL = _first_existing_path(
+    "models/gemma-4-e4b-it",
+    "models/gemma-4-E4B-it",
+    os.path.join(SCRIPT_DIR, "models/gemma-4-e4b-it"),
+    os.path.join(SCRIPT_DIR, "models/gemma-4-E4B-it"),
+)
+MODEL_NAME = _LOCAL_MODEL or "google/gemma-4-e4b-it"
+
+
+def resolve_existing_file(path):
+    """Allow defaults to work from either repo root or this file's directory."""
+    if os.path.exists(path):
+        return path
+    script_relative = os.path.join(SCRIPT_DIR, path)
+    if os.path.exists(script_relative):
+        return script_relative
+    return path
+
+
+def looks_like_jsonl(path):
+    if path.endswith((".jsonl", ".json")):
+        return True
+    with open(path, encoding="utf-8-sig") as fh:
+        for line in fh:
+            stripped = line.lstrip()
+            if stripped:
+                return stripped.startswith("{")
+    return False
+
+
+def load_jsonl_sessions(path):
     with open(path, encoding="utf-8") as fh:
         return [json.loads(line)["turns"] for line in fh if line.strip()]
+
+
+def load_raw_export_sessions(path, args):
+    from parser import build_sessions as build_raw_sessions
+    from parser import parse_messages
+
+    messages = list(parse_messages(path, set(args.drop_authors), args.min_chars))
+    sessions = build_raw_sessions(messages, args.gap_minutes, args.merge_minutes,
+                                  args.max_turns)
+    raw = getattr(parse_messages, "raw_count", 0)
+    print(f"raw message headers : {raw}")
+    print(f"kept messages       : {len(messages)}")
+    print(f"sessions built      : {len(sessions)}")
+    return sessions
+
+
+def load_sessions(path, args):
+    path = resolve_existing_file(path)
+    if looks_like_jsonl(path):
+        print(f"Loading pre-parsed JSONL sessions from {path}")
+        return load_jsonl_sessions(path)
+    print(f"Parsing raw Discord export from {path}")
+    return load_raw_export_sessions(path, args)
 
 
 def build_examples(sessions, context_turns):
@@ -67,27 +128,59 @@ def build_examples(sessions, context_turns):
                 yield context, target
 
 
+def tokenizer_accepts_system_role(tokenizer):
+    try:
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": "hello"},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        return True
+    except Exception as exc:
+        print(f"[info] chat template does not accept a system role; "
+              f"folding system prompt into the user message ({exc})")
+        return False
+
+
+def make_prompt_messages(context, use_system_role):
+    transcript = render_transcript(context)
+    if use_system_role:
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": transcript},
+        ]
+    return [{
+        "role": "user",
+        "content": f"{SYSTEM_PROMPT}\n\nTranscript:\n{transcript}",
+    }]
+
+
 def make_tokenize_fn(tokenizer, max_len):
     """Build the function that turns one example into masked input_ids/labels.
 
-    We render the prompt (system + context, with the assistant generation cue) and
-    construct the full sequence as ``prompt_text + reply + eos``. Tokenizing that,
-    the prompt is *guaranteed* to be a token-prefix of the full sequence, so the
-    reply can never be accidentally masked away -- robust across transformers and
-    chat-template versions. Only the reply (+eos) tokens carry loss.
+    We render the prompt (persona + context, with the assistant generation cue)
+    and construct a full chat sequence with the target assistant reply. Only the
+    reply tokens carry loss.
     """
     eos = tokenizer.eos_token or ""
+    use_system_role = tokenizer_accepts_system_role(tokenizer)
 
     def tokenize(context, target):
-        prompt_msgs = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": render_transcript(context)},
-        ]
+        prompt_msgs = make_prompt_messages(context, use_system_role)
         prompt_text = tokenizer.apply_chat_template(
             prompt_msgs, tokenize=False, add_generation_prompt=True)
-        prompt_ids = tokenizer(prompt_text, add_special_tokens=True)["input_ids"]
-        full_ids = tokenizer(prompt_text + target + eos,
-                             add_special_tokens=True)["input_ids"]
+        full_text = tokenizer.apply_chat_template(
+            prompt_msgs + [{"role": "assistant", "content": target}],
+            tokenize=False,
+            add_generation_prompt=False)
+        prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+        full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+        if full_ids[:len(prompt_ids)] != prompt_ids:
+            full_ids = tokenizer(prompt_text + target + eos,
+                                 add_special_tokens=False)["input_ids"]
 
         labels = list(full_ids)
         for j in range(min(len(prompt_ids), len(full_ids))):
@@ -117,13 +210,55 @@ def build_dataset(sessions, tokenizer, context_turns, max_len, max_examples, lab
     return Dataset.from_list(rows)
 
 
+def find_lora_target_modules(model):
+    """Return exact text-tower Linear module names for PEFT LoRA injection."""
+    wanted = {"q_proj", "k_proj", "v_proj", "o_proj",
+              "gate_proj", "up_proj", "down_proj"}
+    targets = []
+    for name, module in model.named_modules():
+        if not isinstance(module, torch.nn.Linear):
+            continue
+        if ".language_model." not in name:
+            continue
+        if name.rsplit(".", 1)[-1] in wanted:
+            targets.append(name)
+
+    if targets:
+        print(f"LoRA target modules : {len(targets)} language_model Linear layers")
+        return targets
+
+    # Fallback for plain text-only architectures with unwrapped projections.
+    fallback = sorted({
+        name.rsplit(".", 1)[-1]
+        for name, module in model.named_modules()
+        if isinstance(module, torch.nn.Linear) and name.rsplit(".", 1)[-1] in wanted
+    })
+    if not fallback:
+        raise RuntimeError("Could not find any supported Linear modules for LoRA")
+    print(f"LoRA target modules : {fallback}")
+    return fallback
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--input", default="data/conversations.jsonl")
+    ap.add_argument("--input", default="data/conversations.jsonl",
+                    help="pre-parsed conversations JSONL, or raw Discord export")
     ap.add_argument("--output-dir", default="output/giga")
+    ap.add_argument("--model", default=MODEL_NAME,
+                    help="base model id/path")
     ap.add_argument("--context-turns", type=int, default=8,
                     help="how many prior turns to feed as context")
+    ap.add_argument("--gap-minutes", type=int, default=15,
+                    help="raw dataset.txt only: gap above which a new session starts")
+    ap.add_argument("--max-turns", type=int, default=40,
+                    help="raw dataset.txt only: hard cap on turns per session")
+    ap.add_argument("--merge-minutes", type=int, default=2,
+                    help="raw dataset.txt only: merge same-author bursts in this window")
+    ap.add_argument("--min-chars", type=int, default=1,
+                    help="raw dataset.txt only: drop shorter cleaned messages")
+    ap.add_argument("--drop-authors", nargs="*", default=[],
+                    help="raw dataset.txt only: usernames to exclude entirely")
     ap.add_argument("--max-len", type=int, default=1024)
     ap.add_argument("--epochs", type=float, default=3.0)
     ap.add_argument("--batch-size", type=int, default=1)
@@ -177,14 +312,17 @@ def main():
     else:
         optim = "adafactor"             # memory-light, no extra deps (Windows-safe)
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model_name = args.model
+    print(f"base model         : {model_name}")
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     # We truncate manually to --max-len, so silence the "longer than 2048" notice.
     tokenizer.model_max_length = int(1e9)
 
     # Split sessions (not examples) so validation context never leaks into training.
-    sessions = load_sessions(args.input)
+    sessions = load_sessions(args.input, args)
     random.Random(args.seed).shuffle(sessions)
     n_val = int(len(sessions) * args.val_frac)
     val_sessions, train_sessions = sessions[:n_val], sessions[n_val:]
@@ -200,7 +338,7 @@ def main():
     print(f"validation examples: {len(val_ds) if val_ds is not None else 0}")
 
     dtype = torch.bfloat16 if use_bf16 else (torch.float16 if use_fp16 else torch.float32)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=dtype)
+    model = AutoModelForCausalLM.from_pretrained(model_name, dtype=dtype)
     model.config.pad_token_id = tokenizer.pad_token_id
     if grad_ckpt:
         model.config.use_cache = False
@@ -211,8 +349,7 @@ def main():
         lora = LoraConfig(
             r=args.lora_r, lora_alpha=lora_alpha, lora_dropout=0.05, bias="none",
             task_type="CAUSAL_LM",
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj"],
+            target_modules=find_lora_target_modules(model),
         )
         model = get_peft_model(model, lora)
         if grad_ckpt:
