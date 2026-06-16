@@ -1,40 +1,55 @@
 # Giga-GPT2
 
-A **PyTorch- and TinyLlama-powered** system for training an AI that imitates the
-**collective chatting personality of a Discord friend group** and deploying it as a
-live **Discord bot**.
+A Discord friend-group AI built around **Gemma 4 E4B-it**. It fine-tunes the
+model on exported server conversations, then runs it as a live Discord bot with
+text chat, image analysis, optional reasoning mode, GIF reactions, and voice chat.
 
 ---
 
 ## Overview
 
-**Giga-GPT2** fine-tunes [**TinyLlama-1.1B-Chat**](https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0)
-on a raw Discord server export so the model learns to talk like the group — its
-slang, in-jokes, and conversational rhythm — as one blended "Giga" voice.
+**Giga-GPT2** trains a LoRA adapter on a Discord server export so the bot learns
+the server's shared tone, slang, in-jokes, and conversational rhythm as one
+blended "Giga" voice.
 
-The model is given the recent chat as context (so it knows *who said what*) but is
-trained to reply with only the next message. **Speaker names are used purely as
-context and never appear in what the model generates** — it imitates the group
-without ever signing a friend's name to a message. This is achieved with
-chat-format supervised fine-tuning and **loss masking** (only the reply tokens are
-trained on; the name-labelled context is masked out).
+The current bot uses **Gemma 4 E4B-it** as the base model, with the adapter loaded
+from `output/giga/checkpoint-6000` by default. The trainer builds chat-style
+examples from `data/conversations.jsonl`, masks the context tokens, and trains
+only the assistant reply. Speaker names are included as context so the model can
+track who is talking, but generated name prefixes are stripped before Discord
+receives the reply.
+
+The bot now supports more than plain text:
+
+- **Image analysis:** when the bot is pinged with an attached image, it switches to
+  image-only mode, drops previous chat context, and asks Gemma to answer from the
+  image pixels instead of the filename or surrounding conversation.
+- **Reasoning mode:** objective tasks like math, coding/debugging, logic puzzles,
+  seating/constraint problems, planning, and comparisons automatically trigger a
+  slower Gemma thinking pass. Subjective banter like "who is the best member" stays
+  in normal persona mode.
+- **Voice chat:** the bot can join a voice channel, transcribe speech, generate a
+  persona reply, and speak back with TTS.
+- **GIF tool:** the model can optionally request a GIF reaction with a hidden
+  `GIF_SEARCH:` directive; the bot performs the search and attaches the result.
 
 ---
 
 ## Pipeline
 
-```
-dataset.txt ──► parser.py ──► data/conversations.jsonl ──► general_trainer.py ──► output/giga ──► discordGiga.py
-   raw export      clean + sessionize       training data         fine-tune (LoRA)      model        Discord bot
+```text
+dataset.txt -> parser.py -> data/conversations.jsonl -> general_trainer.py -> output/giga -> discordGiga.py
+ raw export    clean/sessionize       training data          Gemma LoRA         adapter      Discord bot
 ```
 
 | File | Role |
 |------|------|
-| `parser.py` | Cleans the raw export (strips attachments/embeds/reactions, URLs, system messages, mentions), merges message bursts, and splits the log into conversation sessions. |
-| `general_trainer.py` | Builds chat-format examples with loss masking and fine-tunes TinyLlama (LoRA by default). |
-| `discordGiga.py` | Loads the fine-tuned model and runs the group-voice Discord bot. |
-| `giga_common.py` | Shared system prompt + formatting helpers (keeps trainer and bot in sync). |
-| `voice_giga.py` | Optional voice-channel support: joins a VC, transcribes each speaker (STT), and replies out loud (TTS). |
+| `parser.py` | Cleans the raw Discord export and turns it into JSONL conversation sessions. |
+| `general_trainer.py` | Builds masked chat-format examples and fine-tunes Gemma 4 E4B-it with LoRA. |
+| `discordGiga.py` | Loads Gemma 4 E4B-it plus the LoRA adapter and runs the Discord bot. |
+| `giga_common.py` | Shared system prompt, username aliases, transcript formatting, and cleanup helpers. |
+| `voice_giga.py` | Optional voice-channel support: receive audio, transcribe speech, and play TTS replies. |
+| `requirements-voice.txt` | Extra packages for voice receive, STT, and TTS. |
 
 ---
 
@@ -43,124 +58,211 @@ dataset.txt ──► parser.py ──► data/conversations.jsonl ──► gen
 ```bash
 git clone https://github.com/Lundii1/Giga-GPT2.git
 cd Giga-GPT2
-pip install torch transformers accelerate datasets peft discord.py==2.2.2 pyarrow
+pip install torch transformers accelerate datasets peft discord.py pyarrow pillow
 ```
+
+For voice support, install the voice extras too:
+
+```bash
+pip install -U --pre -r requirements-voice.txt
+```
+
+You also need **FFmpeg** on your PATH for voice playback.
 
 ---
 
 ## Usage
 
-**1. Parse the raw Discord export** into training data:
+### 1. Parse Discord Logs
+
 ```bash
 python parser.py --input dataset.txt --output data/conversations.jsonl
 ```
 
-**2. Fine-tune the model** (LoRA, ~1 epoch). Use `--max-steps 5` first for a quick smoke test:
-```bash
-python general_trainer.py
-```
-Add `--no-lora` for a full fine-tune if you have a 16 GB+ GPU.
+`dataset.txt` is the raw export. `data/conversations.jsonl` is the preferred
+training input and is what `general_trainer.py` uses by default.
 
-**3. Run the Discord bot** (set your token first):
+### 2. Fine-Tune Gemma
+
 ```bash
-# PowerShell:  $env:DISCORD_TOKEN = "your-bot-token"
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python general_trainer.py \
+  --epochs 3 \
+  --batch-size 8 \
+  --grad-accum 4 \
+  --lora-r 64 \
+  --max-len 1024 \
+  --eval-steps 2000 \
+  --val-frac 0.02
+```
+
+The default base model is the local `models/gemma-4-e4b-it` directory when
+present, otherwise `google/gemma-4-e4b-it`. The default dataset is
+`data/conversations.jsonl`; raw text input still works with `--input dataset.txt`.
+
+### 3. Run the Discord Bot
+
+```bash
+export DISCORD_TOKEN="your-bot-token"
 python discordGiga.py
 ```
 
+Mention the bot or reply to one of its messages to trigger a response.
+
 ---
 
-## Voice chat (optional)
+## Discord Bot Features
 
-Chat can also join a **voice channel**, listen, and talk back. It receives each
-speaker's audio separately, transcribes it with [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-(local, GPU-capable), feeds the text through the *same* persona model used for text
-chat, and speaks the reply with [edge-tts](https://github.com/rany2/edge-tts).
+### Text Persona
 
+The bot keeps a short channel history window, labels its own old messages as
+`Chat (me)`, and replies in the tuned Giga persona. On normal pings it keeps the
+context tight; on replies it can use more context so follow-up messages make
+sense.
+
+### Image Analysis
+
+Attach an image while pinging the bot and it will use Gemma's multimodal processor
+through `AutoModelForMultimodalLM` / `AutoProcessor`.
+
+When images are present:
+
+- prior chat context is removed;
+- member, GIF, and reasoning tools are disabled;
+- the prompt tells the model to prioritize visual accuracy and OCR;
+- the debug log prints `Images attached: N` when image bytes were loaded.
+
+### Reasoning Mode
+
+Reasoning is routed by the bot, not by Discord. The bot detects objective prompts
+and enables Gemma's thinking mode with `enable_thinking=True`.
+
+It triggers for things like:
+
+- arithmetic and math expressions;
+- coding, debugging, algorithms, and errors;
+- logic puzzles and constraint problems;
+- prompts asking to determine all possible arrangements;
+- planning, tradeoff analysis, and precise comparisons.
+
+It intentionally does **not** trigger for greetings, roasts, simple opinions,
+image questions, or subjective server-member ranking questions.
+
+Useful console logs:
+
+```text
+[tool:reasoning] offered=True objective=True subjective=False
+[tool:reasoning] Standalone task detected; dropping prior Discord context
+[tool:reasoning] Auto reasoning triggered from user request; enable_thinking=True
 ```
-🎤 speech ──► faster-whisper (STT) ──► generate_reply (persona) ──► edge-tts (TTS) ──► 🔊 voice channel
-       per-speaker attribution                                          FFmpeg playback
-```
 
-**Install the voice extras** (the text bot works without them). Note the
-`--pre` flag — `discord-ext-voice-recv` only ships pre-releases, and an older
-build can't decrypt Discord's current voice encryption (`OpusError: corrupted
-stream`):
-```bash
-pip install -U --pre -r requirements-voice.txt
-```
-You also need **FFmpeg on your PATH**, and **discord.py ≥ 2.7**.
-
-> ### ⚠️ Discord DAVE E2EE breaks voice receive on normal channels
-> On **2026-03-02** Discord began enforcing **DAVE end-to-end encryption** on all
-> **non-stage** voice calls. This affects *receiving* audio across the whole
-> ecosystem (discord.js too), not just this bot:
-> - discord.py **< 2.7** can't even connect — the voice socket closes with **code 4017**.
-> - discord.py **≥ 2.7** connects, but `voice-recv` doesn't yet implement DAVE
->   decryption, so audio from a normal voice channel arrives as **garbled noise**
->   ([voice-recv #53](https://github.com/imayhaveborkedit/discord-ext-voice-recv/issues/53)).
-> - **Stage channels are exempt** from E2EE enforcement, so `voice-recv` can still
->   decode them — running the bot in a **Stage channel** is the current workaround.
->
-> Install [`davey`](https://github.com/Snazzah/davey) (`pip install "davey>=0.1.5"`) so
-> discord.py 2.7+ can participate in DAVE calls and **speak** (TTS) under E2EE — but note
-> this does **not** fix *receiving*: `voice-recv` decrypts packets itself and has no DAVE
-> support ([PR not yet merged](https://github.com/imayhaveborkedit/discord-ext-voice-recv)).
-> Until it does, use discord.py ≥ 2.7 **+** `davey`, and a **Stage channel** for receive.
-
-**Use it in Discord:**
-1. Join a voice channel yourself.
-2. Type `!join` (or `@Chat join the vc`). The bot pulls up and starts listening.
-3. Say something with **"giga"** in it — that's the voice version of @-mentioning it.
-   It transcribes you, replies in character, and speaks the reply out loud.
-4. Type `!leave` (or `@Chat leave vc`) to make it disconnect.
-
-**Tuning (environment variables):**
+Reasoning token budgets are configurable:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `WHISPER_MODEL` | `small` | faster-whisper size (`tiny`/`base`/`small`/`medium`/`large-v3`). Bigger = more accurate, slower. |
-| `TTS_VOICE` | `en-US-JennyNeural` | edge-tts voice. Jenny is the default warm/caring adult female voice. |
-| `TTS_RATE` | `-8%` | edge-tts prosody rate. Negative values speak slower. |
-| `TTS_PITCH` | `-10Hz` | edge-tts prosody pitch. Negative values lower the voice. |
-| `TTS_VOLUME` | `+0%` | edge-tts prosody volume. |
-| `GIGA_VOICE_RESPOND_ALL` | `0` | Set to `1` to reply to **everything** it hears (no "giga" wake word needed). |
+| `GIGA_REASONING_MAX_NEW_TOKENS` | `2200` | Main reasoning generation budget. |
+| `GIGA_OOM_RETRY_MAX_NEW_TOKENS` | `700` | Shorter retry budget after CUDA OOM. |
+| `GIGA_IMAGE_MAX_NEW_TOKENS` | `512` | Image-analysis generation budget. |
+| `GIGA_MAX_NEW_TOKENS` | `120` | Normal text-chat generation budget. |
 
-> **Note:** STT and TTS run alongside the LLM. A `base` Whisper model + the 4-bit
-> 7B fine-tune fit comfortably on a single mid-range GPU. If `edge-tts` isn't
-> available it falls back to offline `pyttsx3`.
+### GIF Reactions
+
+If the GIF tool is offered, the model can add a hidden command line like:
+
+```text
+GIF_SEARCH: laughing reaction
+```
+
+The bot strips that line, searches Klipy, and sends the GIF URL. Set
+`KLIPY_API_KEY`, `KLIPY_CLIENT_KEY`, or `KLIPY_PLATFORM_KEY` to enable GIF search.
+
+---
+
+## Voice Chat
+
+Chat can join a voice channel, listen, and talk back. Voice currently uses a
+dedicated STT/TTS pipeline rather than Gemma audio:
+
+```text
+speech -> faster-whisper STT -> Gemma persona reply -> edge-tts TTS -> voice channel
+```
+
+Install the voice extras:
+
+```bash
+pip install -U --pre -r requirements-voice.txt
+```
+
+Use it in Discord:
+
+1. Join a voice channel.
+2. Type `!join` or mention the bot with a join request.
+3. Say something with **"giga"** in it; that wake word acts like a voice mention.
+4. Type `!leave` or mention the bot with a leave request to disconnect.
+
+Voice tuning variables:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `WHISPER_MODEL` | `small` | faster-whisper model size. Bigger is usually more accurate and slower. |
+| `WHISPER_COMPUTE` | `int8` | faster-whisper precision. Use int8 variants if VRAM is tight next to Gemma. |
+| `GIGA_VOICE_RESPOND_ALL` | `0` | Set to `1` to reply to every utterance without the wake word. |
+| `GIGA_VOICE_SILENCE_SECONDS` | `0.8` | Silence before an utterance is considered finished. |
+| `GIGA_VOICE_MERGE_PAUSE` | `2.4` | Extra pause window for merging natural mid-thought breaks. |
+| `GIGA_VOICE_MAX_LATENCY` | `6.0` | Drops stale utterances that waited too long. |
+| `TTS_VOICE` | `en-US-JennyNeural` | edge-tts voice. |
+| `TTS_RATE` | `-8%` | TTS speaking rate. |
+| `TTS_PITCH` | `-8Hz` | TTS pitch. |
+| `TTS_VOLUME` | `+0%` | TTS volume. |
+| `GIGA_VOICE_POST_TRANSCRIPTS` | `0` | Set to `1` to post heard speech as text. |
+| `GIGA_VOICE_POST_REPLIES` | `0` | Set to `1` to post spoken replies as text. |
+
+> **Discord voice note:** normal Discord voice receive may be affected by DAVE
+> end-to-end encryption depending on the library and channel type. Stage channels
+> are the safest workaround when receive audio is garbled.
 
 ---
 
 ## Configuration
 
 ### Data
-- `dataset.txt` is the raw Discord export (timestamped `[YYYY-MM-DD HH:MM] username` messages).
-  It stays local — it is git-ignored, since it contains private messages.
-- `parser.py` flags: `--gap-minutes`, `--max-turns`, `--merge-minutes`, `--min-chars`,
-  `--drop-authors "Deleted User"`.
+
+- `dataset.txt` is the raw Discord export and should stay local.
+- `data/conversations.jsonl` is the parsed session dataset from `parser.py`.
+- `dataset_interactions.txt` and `dataset_interactions_voice.txt` collect new bot
+  interactions for later training.
 
 ### Training
-- `general_trainer.py` flags: `--context-turns`, `--max-len`, `--epochs`, `--lr`,
-  `--max-examples`, `--max-steps`, `--no-lora`. The persona system prompt lives in
-  `giga_common.py`.
+
+Common `general_trainer.py` flags:
+
+```text
+--input --base-model --output-dir --context-turns --max-len --epochs --lr
+--batch-size --grad-accum --lora-r --max-examples --max-steps --val-frac
+```
+
+The shared persona prompt and author formatting live in `giga_common.py` so the
+trainer and Discord bot stay aligned.
 
 ### Discord Setup
-1. Create a bot via the [Discord Developer Portal](https://discord.com/developers/applications)
-   and enable the **Message Content** intent.
-2. Provide its token through the `DISCORD_TOKEN` environment variable.
-3. Invite it to your server with the OAuth2 URL. Mention the bot to get a reply.
+
+1. Create a bot in the Discord Developer Portal.
+2. Enable the **Message Content** intent.
+3. Invite it with permissions to read/send messages and, for voice, connect/speak.
+4. Set `DISCORD_TOKEN` before running `discordGiga.py`.
 
 ---
 
 ## Requirements
 
-- **Python 3.10+**
-- **PyTorch 2.x**, **Transformers**, **Accelerate**, **PEFT**, **Datasets** (Hugging Face)
-- **discord.py 2.2.2**, **PyArrow**
-- A raw Discord chat export as `dataset.txt`
-- A **GPU** is strongly recommended (LoRA fits in ~3–4 GB; full fine-tune needs ~16 GB+)
-- *(Optional, voice chat)* **discord.py ≥ 2.4**, **discord-ext-voice-recv**, **faster-whisper**,
-  **edge-tts**, plus **FFmpeg** on PATH — see [Voice chat](#voice-chat-optional)
+- Python 3.10+
+- PyTorch 2.x
+- Transformers with Gemma 4 / multimodal support
+- Accelerate, PEFT, Datasets, PyArrow
+- discord.py
+- Pillow for image loading
+- A GPU is strongly recommended
+- Optional voice: FFmpeg, faster-whisper, discord voice receive extras, edge-tts
 
-> **Note:** Fine-tuning on raw, unfiltered group chat will erode the base model's
-> light safety tuning — the resulting bot mirrors the group's unfiltered style.
+> Fine-tuning on raw group chat will make the bot mirror that server's style,
+> including rough language, bad habits, and weird in-jokes. Curate the dataset if
+> you want a cleaner model.
